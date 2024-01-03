@@ -1,0 +1,86 @@
+
+----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+* DATASET CON RELAZIONI *
+
+CREATE CONSTRAINT ON (p:Person) assert p.number is unique;
+CREATE CONSTRAINT ON (s:Society) assert s.id is unique;
+CREATE CONSTRAINT ON (c:BankAccount) assert c.id is unique;
+
+LOAD CSV WITH HEADERS FROM "file:///100000_records.csv" AS row
+MERGE (p1:Person {number: row.id_conto_P1})
+ON CREATE SET p1.nome=row.nome, p1.cognome=row.cognome, p1.nome_cognome=row.nome_cognomeP1, p1.tel=row.tel, p1.email=row.email, p1.indirizzo=row.indirizzo
+ON MATCH SET p1.nome=row.nome, p1.cognome=row.cognome, p1.nome_cognome=row.nome_cognomeP1, p1.tel=row.tel, p1.email=row.email, p1.indirizzo=row.indirizzo
+MERGE (p2:Person {number: row.id_conto_P2})
+ON CREATE SET p2.nome_cognome=row.nome_cognomeP2, p2.professione=row.professione
+ON MATCH SET p2.nome_cognome=row.nome_cognomeP2, p2.professione=row.professione
+MERGE (s1:Society {id: row.id_societa1})
+ON CREATE SET s1.nome_societa=row.nome_societa, s1.paese=row.paese, s1.citta=row.citta
+ON MATCH SET s1.nome_societa=row.nome_societa, s1.paese=row.paese, s1.citta=row.citta
+MERGE (s2:Society {id: row.id_societa2})
+ON CREATE SET s2.nome_societa=row.nome_societa, s2.paese=row.paese, s2.citta=row.citta
+ON MATCH SET s2.nome_societa=row.nome_societa, s2.paese=row.paese, s2.citta=row.citta
+MERGE (c:BankAccount {id: row.id_credito_banca})
+ON CREATE SET c.tipo_tessera=row.tipo_tessera, c.data_apertura=row.data_apertura, c.data_transazione=row.data_transazione, c.importo=row.importo;
+
+DROP CONSTRAINT ON (p:Person) ASSERT p.number IS UNIQUE;
+DROP CONSTRAINT ON (s:Society) ASSERT s.id IS UNIQUE;
+DROP CONSTRAINT ON (c:BankAccount) ASSERT c.id IS UNIQUE;
+CREATE INDEX ON :Person(number);
+CREATE INDEX ON :Society(id);
+CREATE INDEX ON :BankAccount(id);
+
+:auto USING PERIODIC COMMIT 100000
+LOAD CSV WITH HEADERS FROM "file:///100000_records.csv" AS row
+MATCH (p1:Person {number: row.id_conto_P1}), (c:BankAccount {id: row.id_credito_banca}), (p2:Person {number: row.id_conto_P2})
+CREATE (p1)-[:P_effettua_t{data_transazione:row.data_transazione, importo:row.importo}]->(c)-[:Conto_di]->(p2);
+
+:auto USING PERIODIC COMMIT 100000
+LOAD CSV WITH HEADERS FROM "file:///100000_records.csv" AS row
+MATCH (s2:Society {id: row.id_societa2}), (c:BankAccount {id: row.id_credito_banca})
+CREATE (s1)-[:S_effettua_t{data_transazione:row.data_transazione, importo:row.importo}]->(c);
+
+:auto USING PERIODIC COMMIT 100000
+LOAD CSV WITH HEADERS FROM "file:///100000_records.csv" AS row
+MATCH (p1:Person {number: row.id_conto_P1}), (s2:Society {id: row.id_societa2})
+CREATE (p1)-[:Possiede_quote{quote:row.quote}]->(s2);
+
+:auto USING PERIODIC COMMIT 100000
+LOAD CSV WITH HEADERS FROM "file:///100000_records.csv" AS row
+MATCH (p1:Person {number: row.id_conto_P1}), (p2:Person {number: row.id_conto_P2})
+CREATE (p2)-[:Parente_con]->(p1);
+
+
+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+* QUERY *
+
+// Query 1: Trova tutti i conti bancari posseduti da "Harli Haggidon".
+MATCH (c:BankAccount) - [:Conto_di] -> (p:Person{nome_cognome: 'Harli Haggidon'})
+RETURN p, c
+
+// Query 2: Trova tutte le società possedute da "Torie Pickersgill" con sede in Russia (RU).
+MATCH (p:Person{nome_cognome:'Torie Pickersgill'}) - [:Possiede_quote] -> (s:Society {paese:'RU'})
+RETURN p, s
+
+// Query 3: Trova tutte le società in cui "Rab Faulconer" possiede delle quote sociali superiori al 25%.
+MATCH (p:Person{nome_cognome: 'Rab Faulconer'}) - [possesso:Possiede_quote] -> (s:Society)
+WHERE possesso.quote>'25.0'
+RETURN s, p
+
+// Query 4: Trova la persona di nome "Dominick Condon" che ha effettuato delle transazioni con un importo > di 45000 euro sul conto corrente di "Les Rodders".
+MATCH (p1:Person{nome_cognome: 'Dominick Condon'}) - [soldi:P_effettua_t] -> (c:BankAccount), 
+(c:BankAccount) - [:Conto_di] -> (p2:Person{nome_cognome: 'Les Rodders'})
+WHERE soldi.importo>'€45000'
+RETURN c, p1, p2
+
+// Query 5: Trova la società che ha effettuato delle transazioni il 15 Gennaio del 2044 sul conto corrente 
+// posseduto da "Dorotea Menure" che è parente con delle persone che possiedono quote sociali maggiori al 25% riguardanti la societa stessa.
+MATCH (s:Society) - [data:S_effettua_t] -> (c:BankAccount), 
+(c:BankAccount) - [:Conto_di] -> (p1:Person{nome_cognome: 'Dorotea Menure'}), 
+(p1:Person) - [:Parente_con] -> (p2:Person), 
+(p2:Person) - [possiede:Possiede_quote] -> (s:Society)
+WHERE data.data_transazione='15/01/2044' AND possiede.quote>'25.0'
+RETURN s, c, p1, p2
+
+
